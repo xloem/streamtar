@@ -4,3 +4,8 @@ streamtar appends live data from stdin to a tarball.
 data is preserved in the event of a crash.
 
 Usage: streamtar <tarball>.tar <streamfilename>
+
+## TODO
+
+- [ ] if the size is passed in advance, then no seeking is needed to update it, and the tar blocks can be written to stdout.
+      there may be an existing tool that does that.
