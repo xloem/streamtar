@@ -8,9 +8,8 @@
 
 #include <libtar.h>
 
-// IF THIS SOFTWARE IS EXPANDED, FIRST THE TWO REPEATED CODE BLOCKS SHOULD BE CONSOLIDATED, IF KEPT.
-// 1. testing the result of a call (uses 'perror' and 'exit')
-// 2. writing a new block of data with updated size (uses 'write_or_exit' twice)
+// IF THIS SOFTWARE IS EXPANDED, FIRST APPLY DRY:
+// - testing the result of a call (uses 'perror' and 'exit')
 
 off_t seek_or_exit(TAR *tar, off_t pos, int whence)
 {
@@ -31,6 +30,24 @@ void write_or_exit(TAR *tar, off_t pos, int whence, void const * buffer, size_t 
         perror("write");
         exit(errno);
     }
+}
+
+void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t length)
+{
+    th_set_mtime(tar, mtime); // last modification time
+    size_t offset = length % T_BLOCKSIZE;
+    th_set_size(tar, th_get_size(tar) + length); // size
+    int_to_oct(th_crc_calc(tar), tar->th_buf.chksum, 8); // chksum
+
+    if (offset != 0) {
+        size_t padding = T_BLOCKSIZE - offset;
+        memset(buffer + length, 0, padding);
+        length += padding;
+    }
+
+    /* header is updated first, so seeking past the end on next open will make a valid file with hole. */
+    write_or_exit(tar, header_offset, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
+    write_or_exit(tar, 0, SEEK_END, buffer, length);
 }
 
 int main(int argc, char * const * argv)
@@ -100,35 +117,27 @@ int main(int argc, char * const * argv)
 
     write_or_exit(tar, hpos, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
 
-    ssize_t total, size, offset = 0;
+    ssize_t total, offset = 0;
+    time_t mtime = th_get_mtime(tar);
     char buffer[T_BLOCKSIZE * 1024];
     while ((total = read(0, buffer + offset, sizeof(buffer) - offset)) > 0) {
-        th_set_mtime(tar, time(0)); // last modification time
+        mtime = time(0);
         total += offset;
         offset = total % T_BLOCKSIZE;
-        size = total - offset;
-        th_set_size(tar, th_get_size(tar) + size); // size
-        int_to_oct(th_crc_calc(tar), tar->th_buf.chksum, 8); // chksum
-
-        /* header is updated first, so seeking past the end on next open will make a valid file with hole. */
-        write_or_exit(tar, hpos, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
-
-        write_or_exit(tar, 0, SEEK_END, buffer, size);
-        memcpy(buffer, &buffer[size], offset);
+        size_t size = total - offset;
+        append(tar, hpos, mtime, buffer, size);
+        memcpy(buffer, buffer + size, offset);
     }
 
-    /* write padded buffer */
-    memset(buffer + offset, 0, T_BLOCKSIZE - offset);
+    /* write final chunk buffer */
+    /* this isn't written for terminations midway because the only midway termination is a write failure. */
 
-    th_set_size(tar, th_get_size(tar) + offset); // size
-    int_to_oct(th_crc_calc(tar), tar->th_buf.chksum, 8); // chksum
-    /* header is updated first, so seeking past the end on next open will make a valid file with hole. */
-    write_or_exit(tar, hpos, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
-    write_or_exit(tar, 0, SEEK_END, buffer, T_BLOCKSIZE);
+    append(tar, hpos, mtime, buffer, offset);
 
     if (errno) {
         perror("read");
     }
+
     th_print_long_ls(tar);
 
     return errno;
