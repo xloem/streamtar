@@ -3,6 +3,7 @@
 #include <stdio.h> /* printf */
 #include <stdlib.h> /* exit */
 #include <string.h> /* memset */
+#include <sys/file.h> /* flock */
 #include <time.h> /* time */
 #include <unistd.h> /* lseek */
 
@@ -19,6 +20,15 @@ off_t seek_or_exit(TAR *tar, off_t pos, int whence)
         exit(errno);
     }
     return pos2;
+}
+
+void flock_or_exit(TAR *tar, int lock)
+{
+    int r = flock(tar->fd, lock ? LOCK_SH : LOCK_UN);
+    if (r == -1) {
+        perror(lock ? "flock" : "funlock");
+        exit(errno);
+    }
 }
 
 void write_or_exit(TAR *tar, off_t pos, int whence, void const * buffer, size_t count)
@@ -45,9 +55,11 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
         length += padding;
     }
 
+    flock_or_exit(tar, 1);
     /* header is updated first, so seeking past the end on next open will make a valid file with hole. */
     write_or_exit(tar, header_offset, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
     write_or_exit(tar, 0, SEEK_END, buffer, length);
+    flock_or_exit(tar, 0);
 }
 
 int main(int argc, char * const * argv)
@@ -115,7 +127,9 @@ int main(int argc, char * const * argv)
     th_set_size(tar, 0); // size
     int_to_oct(th_crc_calc(tar), tar->th_buf.chksum, 8); // chksum
 
+    flock_or_exit(tar, 1);
     write_or_exit(tar, hpos, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
+    flock_or_exit(tar, 0);
 
     ssize_t total, offset = 0;
     time_t mtime = th_get_mtime(tar);
