@@ -1,0 +1,6 @@
+# streamtar
+
+streamtar appends live data from stdin to a tarball.
+data is preserved in the event of a crash.
+
+Usage: streamtar <tarball>.tar <streamfilename>
