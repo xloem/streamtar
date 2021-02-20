@@ -16,3 +16,4 @@ test: streamtar
 	tar tvf streamtar-test.tar
 	[ "$$(tar -xOf streamtar-test.tar streamtar-test/makefile | sha256sum)" == "$$(cat makefile | sha256sum)" ]
 	[ "$$(tar -xOf streamtar-test.tar streamtar-test/streamtar.c | sha256sum)" == "$$(cat streamtar.c | sha256sum)" ]
+	rm streamtar-test.tar

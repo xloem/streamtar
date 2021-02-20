@@ -1,3 +1,5 @@
+#define _FILE_OFFSET_BITS 64
+
 #include <errno.h> /* errno */
 #include <fcntl.h> /* open */
 #include <stdio.h> /* printf */
@@ -9,38 +11,16 @@
 
 #include <libtar.h>
 
-// IF THIS SOFTWARE IS EXPANDED, FIRST APPLY DRY:
-// - testing the result of a call (uses 'perror' and 'exit')
-
-off_t seek_or_exit(TAR *tar, off_t pos, int whence)
+off_t _err(off_t expected, char const * name, off_t result)
 {
-    off_t pos2 = lseek(tar->fd, pos, whence);
-    if (pos2 == -1 || (pos && pos2 != pos)) {
-        perror("lseek");
+    if (expected ? expected != result : result < 0) {
+        perror(name);
         exit(errno);
     }
-    return pos2;
+    return result;
 }
-
-void flock_or_exit(TAR *tar, int lock)
-{
-    int r = flock(tar->fd, lock ? LOCK_SH : LOCK_UN);
-    if (r == -1) {
-        perror(lock ? "flock" : "funlock");
-        exit(errno);
-    }
-}
-
-void write_or_exit(TAR *tar, off_t pos, int whence, void const * buffer, size_t count)
-{
-    int r;
-    seek_or_exit(tar, pos, whence);
-    r = write(tar->fd, buffer, count);
-    if (r != count) {
-        perror("write");
-        exit(errno);
-    }
-}
+#define err(func, ...) _err(0, #func, func(__VA_ARGS__))
+#define errneq(expected, func, ...) _err(expected, #func, func(__VA_ARGS__))
 
 void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t length)
 {
@@ -55,11 +35,18 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
         length += padding;
     }
 
-    flock_or_exit(tar, 1);
-    /* header is updated first, so seeking past the end on next open will make a valid file with hole. */
-    write_or_exit(tar, header_offset, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
-    write_or_exit(tar, 0, SEEK_END, buffer, length);
-    flock_or_exit(tar, 0);
+    int fd = tar_fd(tar);
+
+    err(flock, fd, LOCK_SH);
+
+    /* first seek to header and write header, so seeking past the end on next open will make a valid file with hole and timestamp of missing data */
+    errneq(header_offset, lseek, fd, header_offset, SEEK_SET);
+    errneq(T_BLOCKSIZE, write, fd, &tar->th_buf, T_BLOCKSIZE);
+    /* seek back to end and write next data */
+    err(lseek, fd, 0, SEEK_END);
+    errneq(length, write, fd, buffer, length);
+
+    err(flock, fd, LOCK_UN);
 }
 
 int main(int argc, char * const * argv)
@@ -80,20 +67,12 @@ int main(int argc, char * const * argv)
     char *inner_fn = argv[2];
 
     TAR * tar;
-    int fd = open(outer_fn, O_RDWR | O_CREAT, 0600);
-    if (fd == -1) {
-        perror("open");
-        exit(errno);
-    }
-    int r = tar_fdopen(&tar, fd, outer_fn, NULL, 0, 0600, TAR_VERBOSE | TAR_NOOVERWRITE);
-    if (r == -1) {
-        perror("tar_fdopen");
-        exit(errno);
-    }
+    int fd = err(open, outer_fn, O_RDWR | O_CREAT, 0600);
+    err(tar_fdopen, &tar, fd, outer_fn, NULL, 0, 0600, TAR_VERBOSE | TAR_NOOVERWRITE);
     off_t hpos = 0;
 
     /* read existing records to seek to correct end for short writes */
-    while ((r = th_read(tar)) == 0) {
+    while (err(th_read, tar) == 0) {
         if (tar->th_buf.name[0] == 0) {
             // EOF indicator
             break;
@@ -101,16 +80,7 @@ int main(int argc, char * const * argv)
         size_t size = th_get_size(tar);
         size_t extra = size % T_BLOCKSIZE;
         size_t total = extra > 0 ? size - extra + T_BLOCKSIZE : size;
-        hpos = lseek(fd, total, SEEK_CUR);
-        if (hpos == -1) {
-            perror("lseek");
-            exit(errno);
-        }
-    }
-
-    if (r == -1) {
-        perror("th_read");
-        exit(errno);
+        hpos = err(lseek, fd, total, SEEK_CUR);
     }
 
     /* write new record */
@@ -127,25 +97,20 @@ int main(int argc, char * const * argv)
     th_set_size(tar, 0); // size
     int_to_oct(th_crc_calc(tar), tar->th_buf.chksum, 8); // chksum
 
-    flock_or_exit(tar, 1);
-    write_or_exit(tar, hpos, SEEK_SET, &tar->th_buf, T_BLOCKSIZE);
-    flock_or_exit(tar, 0);
-
-    ssize_t total, offset = 0;
+    ssize_t total = 0, offset = 0;
     time_t mtime = th_get_mtime(tar);
     char buffer[T_BLOCKSIZE * 1024];
-    while ((total = read(0, buffer + offset, sizeof(buffer) - offset)) > 0) {
+    do {
         mtime = time(0);
         total += offset;
         offset = total % T_BLOCKSIZE;
         size_t size = total - offset;
         append(tar, hpos, mtime, buffer, size);
         memcpy(buffer, buffer + size, offset);
-    }
+    } while ((total = read(0, buffer + offset, sizeof(buffer) - offset)) > 0);
 
     /* write final chunk buffer */
-    /* this isn't written for terminations midway because the only midway termination is a write failure. */
-
+    /* this isn't written in _err() because the only midway terminations relate to writing. */
     append(tar, hpos, mtime, buffer, offset);
 
     if (errno) {
