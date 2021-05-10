@@ -48,7 +48,7 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
     /* first seek to header and write header, so seeking past the end on next open will make a valid file with hole and timestamp of missing data */
     if (debug_writes) {
         char dbgnam[256];
-        sprintf(dbgnam, "%d-debug_writes-header-%d.bin", time(0), header_offset);
+        sprintf(dbgnam, "%lld-debug_writes-header-%lld.bin", (long long)time(0), (long long)header_offset);
         int dbgfd = err(open, dbgnam, O_WRONLY | O_CREAT, 0600);
         errneq(T_BLOCKSIZE, write, dbgfd, &tar->th_buf, T_BLOCKSIZE);
         close(dbgfd);
@@ -59,7 +59,7 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
     /* seek back to end and write next data */
     if (debug_writes) {
         char dbgnam[256];
-        sprintf(dbgnam, "%d-debug_writes-data-end.bin", time(0));
+        sprintf(dbgnam, "%lld-debug_writes-data-end.bin", (long long)time(0));
         int dbgfd = err(open, dbgnam, O_WRONLY | O_CREAT, 0600);
         errneq(length, write, dbgfd, buffer, length);
         close(dbgfd);
@@ -107,9 +107,9 @@ int main(int argc, char * const * argv)
             // EOF indicator
             break;
         }
-        size_t size = th_get_size(tar);
-        size_t extra = size % T_BLOCKSIZE;
-        size_t total = extra > 0 ? size - extra + T_BLOCKSIZE : size;
+        off_t size = th_get_size(tar);
+        off_t extra = size % T_BLOCKSIZE;
+        off_t total = extra > 0 ? size - extra + T_BLOCKSIZE : size;
         hpos = err(lseek, fd, total, SEEK_CUR);
     }
 
