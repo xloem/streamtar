@@ -11,6 +11,12 @@
 
 #include <libtar.h>
 
+#ifndef DEBUG_WRITES
+	#define debug_writes 0
+#else
+	#define debug_writes 1
+#endif
+
 off_t _err(off_t expected, char const * name, off_t result)
 {
     if (expected ? expected != result : result < 0) {
@@ -40,9 +46,23 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
     err(flock, fd, LOCK_SH);
 
     /* first seek to header and write header, so seeking past the end on next open will make a valid file with hole and timestamp of missing data */
+    if (debug_writes) {
+        char dbgnam[256];
+        sprintf(dbgnam, "%d-debug_writes-header-%d.bin", time(0), header_offset);
+        int dbgfd = err(open, dbgnam, O_WRONLY | O_CREAT, 0600);
+        errneq(T_BLOCKSIZE, write, dbgfd, &tar->th_buf, T_BLOCKSIZE);
+        close(dbgfd);
+    }
     errneq(header_offset, lseek, fd, header_offset, SEEK_SET);
     errneq(T_BLOCKSIZE, write, fd, &tar->th_buf, T_BLOCKSIZE);
     /* seek back to end and write next data */
+    if (debug_writes) {
+        char dbgnam[256];
+        sprintf(dbgnam, "%d-debug_writes-data-end.bin", time(0));
+        int dbgfd = err(open, dbgnam, O_WRONLY | O_CREAT, 0600);
+        errneq(length, write, dbgfd, buffer, length);
+        close(dbgfd);
+    }
     err(lseek, fd, 0, SEEK_END);
     errneq(length, write, fd, buffer, length);
 
