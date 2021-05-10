@@ -1,5 +1,5 @@
 LDLIBS=-ltar
-CFLAGS=-ggdb
+CFLAGS=-ggdb -O0 -DDEBUG
 PREFIX=/usr/local
 all: streamtar
 clean:
@@ -14,6 +14,6 @@ test: streamtar
 	./streamtar streamtar-test.tar streamtar-test/streamtar.c < streamtar.c
 	./streamtar streamtar-test.tar streamtar-test/makefile < makefile
 	tar tvf streamtar-test.tar
-	[ "$$(tar -xOf streamtar-test.tar streamtar-test/makefile | sha256sum)" == "$$(cat makefile | sha256sum)" ]
-	[ "$$(tar -xOf streamtar-test.tar streamtar-test/streamtar.c | sha256sum)" == "$$(cat streamtar.c | sha256sum)" ]
+	test "$$(tar -xOf streamtar-test.tar streamtar-test/makefile | sha256sum)" = "$$(cat makefile | sha256sum)"
+	test "$$(tar -xOf streamtar-test.tar streamtar-test/streamtar.c | sha256sum)" = "$$(cat streamtar.c | sha256sum)"
 	rm streamtar-test.tar
