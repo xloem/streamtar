@@ -55,6 +55,7 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
     }
     errneq(header_offset, lseek, fd, header_offset, SEEK_SET);
     errneq(T_BLOCKSIZE, write, fd, &tar->th_buf, T_BLOCKSIZE);
+
     /* seek back to end and write next data */
     if (debug_writes) {
         char dbgnam[256];
@@ -63,8 +64,17 @@ void append(TAR *tar, off_t header_offset, time_t mtime, char * buffer, size_t l
         errneq(length, write, dbgfd, buffer, length);
         close(dbgfd);
     }
-    err(lseek, fd, 0, SEEK_END);
-    errneq(length, write, fd, buffer, length);
+    if ( /* if all zeros, write sparsely */
+        length >= sizeof(long) &&
+        0 == *(long*)buffer &&
+        !memcmp(buffer, buffer + sizeof(long), length - sizeof(long))
+    ) {
+        off_t sparsesize = err(lseek, fd, length, SEEK_END);
+        err(ftruncate, fd, sparsesize);
+    } else {
+        err(lseek, fd, 0, SEEK_END);
+        errneq(length, write, fd, buffer, length);
+    }
 
     err(flock, fd, LOCK_UN);
 }
