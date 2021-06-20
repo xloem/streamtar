@@ -128,7 +128,6 @@ int main(int argc, char * const * argv)
     int_to_oct(th_crc_calc(tar), tar->th_buf.chksum, 8); // chksum
 
     ssize_t just_read = 0, pending = 0, offset = 0;
-    off_t remaining = 077777777777; // libtar doesn't have size extensions, so this is max filesize
     time_t mtime = th_get_mtime(tar);
     char buffer[T_BLOCKSIZE * 1024];
     do {
@@ -137,27 +136,18 @@ int main(int argc, char * const * argv)
         offset = pending % T_BLOCKSIZE;
         size_t size = pending - offset;
         append(tar, hpos, mtime, buffer, size);
-        remaining -= size;
         memcpy(buffer, buffer + size, offset);
-    } while ((just_read = read(0,
-                               buffer + offset,
-                               (remaining < sizeof(buffer) ? remaining : sizeof(buffer)) - offset
-                              )) > 0);
+    } while ((just_read = read(0, buffer + offset, sizeof(buffer) - offset)) > 0);
 
     /* write final unwritten chunk buffer */
     /* this isn't written in _err() because the only midway terminations relate to writing. */
     append(tar, hpos, mtime, buffer, offset);
-    remaining -= offset;
 
     if (errno) {
         perror("read");
     }
 
     th_print_long_ls(tar);
-
-    if (remaining == 0) {
-	printf("Reached max libtar filesize.  Start new file.\n");
-    }
 
     return errno;
 }
